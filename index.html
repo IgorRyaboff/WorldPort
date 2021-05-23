@@ -1,0 +1,51 @@
+<html lang="en">
+<head>
+    <style>
+        html { background: white; }
+    </style>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorldPort</title>
+</head>
+<body>
+    <div id="app">
+        <div>
+            Server: <input v-model="server" :disabled="status != 0"/>
+        </div>
+        <div>
+            Local port: <input v-model="port" :disabled="status != 0"/>
+        </div>
+        <div>
+            External port: <input v-model="externalPort" :disabled="status != 0"/>
+            <label>
+                <input type="checkbox" v-model="force" :disabled="status != 0"/> Force
+            </label>
+        </div>
+        <div>
+            <button :disabled="!server || isNaN(port) || port < 1 || port > 65535 || (externalPort && (isNaN(externalPort) || externalPort < 10000 || externalPort > 55535))"
+                @click="connect">{{ status == 0 ? 'Connect' : 'Disconnect' }}</button>
+        </div>
+        <hr/>
+
+        <div>
+            Status: {{ displayStatus }}
+        </div>
+        <div v-if="lastError && status != 3">
+            Last error: {{ lastError }}
+        </div>
+        <div v-if="status == 3">
+            Session ID: {{ sessionID }}
+        </div>
+        <div v-if="status == 3">
+            Exposing on <b>{{server}}:{{ assignedExternalPort }}</b>
+        </div>
+        <div v-if="status == 3">
+            {{ sockets }} sockets open
+        </div>
+    </div>
+    
+    <script src="vue.js"></script>
+    <script src="index.js"></script>
+</body>
+</html>

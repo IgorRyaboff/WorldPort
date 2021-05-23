@@ -1,0 +1,24 @@
+{
+    "name": "worldport",
+    "version": "21.05.23",
+    "description": "Simple to use reverse proxy",
+    "main": "main.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "electron ."
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/IgorRyaboff/WorldPort.git"
+    },
+    "author": "Igor Ryabov",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/IgorRyaboff/WorldPort/issues"
+    },
+    "homepage": "https://github.com/IgorRyaboff/WorldPort#readme",
+    "dependencies": {
+        "electron": "^12.0.9",
+        "websocket": "^1.0.34"
+    }
+}
