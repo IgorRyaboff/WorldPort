@@ -7,14 +7,20 @@ let vueApp = new Vue({
     el: '#app',
     data: {
         status: 0,
-        port: null,
+        localIP: '127.0.0.1',
+        localPort: null,
         externalPort: null,
         assignedExternalPort: null,
         force: false,
         server: null,
         sockets: 0,
         sessionID: null,
-        lastError: null
+        lastError: null,
+        recieved: 0,
+        sent: 0,
+        authMethod: 'anon',
+        credsLogin: '',
+        credsPassword: ''
     },
     computed: {
         displayStatus() {
@@ -53,20 +59,18 @@ let vueApp = new Vue({
     methods: {
         connect() {
             if (this.status == 0) {
-                /*
-                status: 0,
-                port: null,
-                externalPort: null,
-                force: false,
-                server: ''
-                */
-               console.log('!port number ' + this.port);
+               console.log('!localIP number ' + this.localIP);
+               console.log('!localPort number ' + this.localPort);
                console.log('!externalPort number ' + this.externalPort);
                console.log('!force number ' + +this.force);
                console.log('!server string ' + this.server);
+               console.log('!credsLogin string ' + (this.authMethod == 'credentials' ? this.credsLogin : 'anon'));
+               console.log('!credsPassword string ' + (this.authMethod == 'credentials' ? this.credsPassword : ''));
+               console.log('!authMethod string ' + (this.authMethod == 'anon' ? 'credentials' : this.authMethod));
                console.log('>connect');
             }
             else console.log('>disconnect');
         }
     }
 });
+console.log('>init')

@@ -5,14 +5,20 @@ const WebSocket = require('websocket');
 
 let data = {
     status: 0,
-    port: null,
+    localIP: '127.0.0.1',
+    localPort: null,
     externalPort: null,
     assignedExternalPort: null,
     force: false,
     server: '',
     sockets: 0,
     sessionID: null,
-    lastError: null
+    lastError: null,
+    recieved: 0,
+    sent: 0,
+    authMethod: 'anon',
+    credsLogin: '',
+    credsPassword: ''
 };
 function setData(key, value) {
     data[key] = value;
@@ -22,11 +28,8 @@ function setData(key, value) {
 let win;
 function createWindow() {
     const wind = new BrowserWindow({
-        width: 800,
-        height: 600,
-        webPreferences: {
-            preload: path.join(__dirname, 'preload.js')
-        }
+        width: 600,
+        height: 350
     });
     win = wind;
 
@@ -64,6 +67,10 @@ function createWindow() {
                     clearTimeout(reconTO);
                     break;
                 }
+                case 'init': {
+                    for (let i in data) setData(i, data[i]);
+                    break;
+                }
             }
         }
     });
@@ -92,21 +99,37 @@ process.on("uncaughtException", function (e) {
 });
 
 let wsBuffer = [];
+/**
+ * @type {WebSocket.connection}
+ */
 let wsCon;
 function wsSend(e, data = {}) {
-    data._e = e;
+    if (e) data._e = e;
     if (wsCon) wsCon.sendUTF(JSON.stringify(data));
     else wsBuffer.push(data);
 
 }
+function wsSendBinary(tunnelID, data) {
+    if (tunnelID) data = Buffer.from([...[...tunnelID].map(x => x.charCodeAt(0)), ...data]);
+    if (wsCon) {
+        wsCon.sendBytes(data);
+        console.log(tunnelID || data.subarray(0, 2).toString(), 'sent binary');
+    }
+    else wsBuffer.push(data);
+}
 
-let sockets = {};
+/**
+ * @type {Object<string, [ net.Socket, Buffer[] ]>}
+ */
+let tunnels = {};
 
 function dropSession() {
     console.log('Dropped session');
     setData('sessionID', null);
-    Object.values(sockets).forEach(pair => pair[0].end());
+    Object.values(tunnels).forEach(pair => pair[0].end());
     setData('sockets', 0);
+    setData('recieved', 0);
+    setData('sent', 0);
 }
 
 let reconTO;
@@ -123,8 +146,8 @@ function wsConnect() {
         let lastAliveCheck = new Date;
         let aliveCheckInterval = setInterval(() => {
             if (new Date - lastAliveCheck >= 20000) {
-                console.log('Server did not aliveCheck last 20 seconds. Connection will beclosed');
-                wsCon.close();
+                console.log('Server did not aliveCheck last 20 seconds. Connection will be closed');
+                wsCon.close(4500);
             }
             else wsSend('aliveCheck');
         }, 10000);
@@ -178,6 +201,16 @@ function wsConnect() {
                     console.log('Server did not send aliveCheck in 20 seconds. Trying again in 3 seconds...');
                     break;
                 }
+                case 4007: { // Resurrect: wrong token
+                    dropSession();
+                    console.log('Resurrect: wrong token. Connection will not be resurrected.');
+                    break;
+                }
+                case 4008: { // Auth failed
+                    dropSession();
+                    console.log('Auth failed. Connection will not be resurrected.');
+                    break;
+                }
                 default: {
                     reconTO = setTimeout(() => {
                         wsConnect();
@@ -191,89 +224,102 @@ function wsConnect() {
         con.on('error', e => console.error(`Error in WebSocket: ${e}`));
     
         con.on('message', raw => {
-            let msg;
-            try {
-                msg = JSON.parse(raw.utf8Data);
+            if (raw.type == 'binary') {
+                let id = raw.binaryData.subarray(0, 2).toString();
+                let data = raw.binaryData.slice(2);
+                if (tunnels[id]) {
+                    if (tunnels[id][0]) tunnels[id][0].write(data);
+                    else tunnels[id][1].push(data);
+                    console.log(id, 'received binary');
+                }
+                else console.log('unknown binary for ', id);
             }
-            catch (_e) { }
-    
-            if (!msg || !msg._e) return;
-            console.log(`${msg.sessionID}: ${msg._e}`);
-            switch (msg._e) {
-                case 'aliveCheck': {
-                    lastAliveCheck = new Date;
-                    console.log(data.sessionID + ': aliveCheck recieved');
-                    break;
+            else {
+                let msg;
+                try {
+                    msg = JSON.parse(raw.utf8Data);
                 }
-                case 'session.created': {
-                    setData('sessionID', msg.id);
-                    console.log(`Session ${msg.id} on ext port ${msg.port} created`);
-                    setData('status', 3);
-                    setData('assignedExternalPort', msg.port);
-                    break;
-                }
-                case 'rps.create': {
-                    let isocket = new net.Socket();
-                    isocket.connect(data.externalPort + 10000, data.server, () => {
-                        console.log('isocket opened ' + msg.id);
-                        if (sockets[msg.id]) {
-                            sockets[msg.id][0].end();
-                            sockets[msg.id][0] = isocket;
+                catch (_e) { }
+        
+                if (!msg || !msg._e) return;
+                console.log(`${msg.sessionID}: ${msg._e}`);
+                switch (msg._e) {
+                    case 'aliveCheck': {
+                        lastAliveCheck = new Date;
+                        console.log(data.sessionID + ': aliveCheck recieved');
+                        break;
+                    }
+                    case 'session.created': {
+                        setData('sessionID', msg.id);
+                        console.log(`Session ${msg.id} on ext port ${msg.port} created`);
+                        setData('status', 3);
+                        setData('assignedExternalPort', msg.port);
+                        break;
+                    }
+                    case 'tunnel.created': {
+                        console.log('New tunnel ' + msg.id);
+                        tunnels[msg.id] = [null, []];
+
+                        let s2 = new net.Socket();
+                        let s2lastcount = 0;
+                        let s2count = 0;
+                        s2.on('data', chunk => {
+                            wsSendBinary(msg.id, chunk);
+                            s2count += chunk.length;
+                            if (s2count - s2lastcount > 1024 * 512) {
+                                setData('sent', s2count);
+                                s2lastcount = s2count;
+                            }
+                        });
+                        s2.on('close', () => {
+                            if (tunnels[msg.id]) {
+                                delete tunnels[msg.id];
+                                wsSend('tunnel.close', {
+                                    id: msg.id
+                                });
+                                setData('sockets', Object.keys(tunnels).length);
+                                console.log('S2 closed ' + msg.id);
+                            }
+                        });
+                        s2.on('error', () => {});
+                        
+                        s2.connect(data.localPort, data.localIP, () => {
+                            console.log('S2 opened ' + msg.id, tunnels[msg.id]);
+                            if (!tunnels[msg.id]) {
+                                s2.end();
+                                return;
+                            }
+                            tunnels[msg.id][0] = s2;
+                            tunnels[msg.id][1].forEach(chunk => s2.write(chunk));
+                            tunnels[msg.id][1] = [];
+                        });
+                        break;
+                    }
+                    case 'tunnel.closed': {
+                        if (tunnels[msg.id]) {
+                            if (tunnels[msg.id][0]) tunnels[msg.id][0].end();
+                            delete tunnels[msg.id];
                         }
-                        else {
-                            sockets[msg.id] = [ isocket, false, [] ];
-                            setData('sockets', Object.keys(sockets).length);
-                        }
-                        isocket.write(msg.id);
-    
-                        let osocketAlive = false;
-                        let buffer = [];
-                        let osocket = new net.Socket();
-    
-                        isocket.on('data', chunk => {
-                            if (osocketAlive) osocket.write(chunk);
-                            else buffer.push(chunk);
-                        });
-                        isocket.on('close', () => osocket.end() && console.log('isocket closed ' + msg.id));
-                        isocket.on('error', () => {});
-    
-                        osocket.on('data', chunk => {
-                            isocket.write(chunk);
-                        });
-                        osocket.on('close', () => {
-                            if (sockets[msg.id]) isocket.end();
-                            delete sockets[msg.id];
-                            setData('sockets', Object.keys(sockets).length);
-                            console.log('osocket closed ' + msg.id);
-                        });
-                        osocket.on('error', () => {});
-    
-                        osocket.connect(data.port, '127.0.0.1', () => {
-                            console.log('osocket opened ' + msg.id);
-                            osocketAlive = true;
-                            sockets[msg.id][1] = osocket;
-                            buffer.forEach(chunk => osocket.write(chunk));
-                            buffer = [];
-                        });
-                    });
-                    break;
+                        console.log(`Tunnel #${msg.id} closed by server`);
+                        break;
+                    }
                 }
             }
         });
         wsCon = con;
-        wsBuffer.forEach(m => wsSend(m._e, m));
+        wsBuffer.forEach(m => Buffer.isBuffer(m) ? wsSendBinary(null, m) : wsSend(null, m));
         wsBuffer = [];
     });
     ws.on('connectFailed', e => {
         ws = false;
         console.error('WebSocket failed: ' + e + '. Retrying in 3 seconds...', data.status);
-        setData('lastError', String(e));
+        setData('lastError', String(e).split('\n')[0]);
         if (data.status != 0) reconTO = setTimeout(() => {
             wsConnect();
         }, 3000);
     });
 
-    ws.connect(`ws://${data.server}:100`);
+    ws.connect(`ws://${data.server}${data.server.indexOf(':') == -1 ? ':100' : ''}`);
     if (data.sessionID) {
         wsSend('session.resurrect', {
             id: data.sessionID
@@ -283,8 +329,11 @@ function wsConnect() {
     else {
         wsSend('session.create', {
             externalPort: data.externalPort && !isNaN(data.externalPort) ? parseInt(data.externalPort) : null,
-            forceExternalPort: Boolean(data.force)
+            forceExternalPort: Boolean(data.force),
+            authMethod: data.authMethod,
+            login: data.authMethod == 'credentials' ? data.credsLogin : undefined,
+            password: data.authMethod == 'credentials' ? data.credsPassword : undefined,
         });
-        console.log('Creating new session');
+        console.log(`Creating new session for ${data.credsLogin}:${data.credsPassword.substr(0, 4)}***@${data.server}`);
     }
 }

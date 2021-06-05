@@ -1,11 +1,13 @@
 {
     "name": "worldport",
-    "version": "21.05.23",
+    "version": "2021.5.23",
     "description": "Simple to use reverse proxy",
     "main": "main.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
-        "start": "electron ."
+        "start": "electron .",
+        "pack": "electron-builder --dir",
+        "dist": "electron-builder -w"
     },
     "repository": {
         "type": "git",
@@ -18,7 +20,26 @@
     },
     "homepage": "https://github.com/IgorRyaboff/WorldPort#readme",
     "dependencies": {
-        "electron": "^12.0.9",
         "websocket": "^1.0.34"
+    },
+    "devDependencies": {
+        "electron": "^12.0.9",
+        "electron-builder": "^22.10.5"
+    },
+    "build": {
+        "productName": "WorldPort",
+        "artifactName": "${productName}_${version}_${os}_${arch}.${ext}",
+        "win": {
+            "target": "nsis"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "displayLanguageSelector": false
+        },
+        "linux": {
+            "target": "deb",
+            "maintainer": "Igor Ryabov"
+        }
     }
 }

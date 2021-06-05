@@ -6,24 +6,38 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- <link rel="stylesheet" href="metroui/css/metro-all.min.css"/> -->
     <title>WorldPort</title>
 </head>
 <body>
     <div id="app">
         <div>
-            Server: <input v-model="server" :disabled="status != 0"/>
+            Server: <input data-role="input" v-model="server" :disabled="status != 0"/>
         </div>
         <div>
-            Local port: <input v-model="port" :disabled="status != 0"/>
+            Local IP: <input data-role="input" v-model="localIP" :disabled="status != 0"/>
         </div>
         <div>
-            External port: <input v-model="externalPort" :disabled="status != 0"/>
+            Local port: <input data-role="input" v-model="localPort" :disabled="status != 0"/>
+        </div>
+        <div>
+            External port: <input data-role="input" v-model="externalPort" :disabled="status != 0"/>
             <label>
-                <input type="checkbox" v-model="force" :disabled="status != 0"/> Force
+                <input data-role="checkbox" type="checkbox" v-model="force" :disabled="status != 0"/> Force
             </label>
         </div>
         <div>
-            <button :disabled="!server || isNaN(port) || port < 1 || port > 65535 || (externalPort && (isNaN(externalPort) || externalPort < 10000 || externalPort > 55535))"
+            Auth:
+            <label><input type="radio" v-model="authMethod" value="anon" :disabled="status != 0"/> Anonymous</label>
+            <label><input type="radio" v-model="authMethod" value="credentials" :disabled="status != 0"/>Credentials</label>
+
+            <div>
+                Login: <input data-role="input" v-model="credsLogin" :disabled="status != 0 || authMethod != 'credentials'"/>
+                Password: <input data-role="input" type="password" v-model="credsPassword" :disabled="status != 0 || authMethod != 'credentials'"/>
+            </div>
+        </div>
+        <div>
+            <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && (isNaN(externalPort) || externalPort < 10000 || externalPort > 55535))"
                 @click="connect">{{ status == 0 ? 'Connect' : 'Disconnect' }}</button>
         </div>
         <hr/>
@@ -43,8 +57,13 @@
         <div v-if="status == 3">
             {{ sockets }} sockets open
         </div>
+        <div v-if="status == 3">
+            <div>Recieved: {{ (recieved / 1024 / 1024).toFixed(1) }} MB</div>
+            <div>Sent: {{ (sent / 1024 / 1024).toFixed(1) }} MB</div>
+        </div>
     </div>
     
+    <!-- <script src="metroui/js/metro.min.js"></script> -->
     <script src="vue.js"></script>
     <script src="index.js"></script>
 </body>
