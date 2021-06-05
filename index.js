@@ -59,7 +59,7 @@ let vueApp = new Vue({
     methods: {
         connect() {
             if (this.status == 0) {
-               console.log('!localIP number ' + this.localIP);
+               console.log('!localIP string ' + this.localIP);
                console.log('!localPort number ' + this.localPort);
                console.log('!externalPort number ' + this.externalPort);
                console.log('!force number ' + +this.force);

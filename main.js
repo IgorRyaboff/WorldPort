@@ -3,6 +3,29 @@ const path = require('path');
 const net = require('net');
 const WebSocket = require('websocket');
 
+function formatDate(date) {
+    const adjustZeros = (x, required = 2) => {
+        x = String(x);
+        while (x.length < required) x = '0' + x;
+        return x;
+    }
+    if (!(date instanceof Date)) date = new Date(+date);
+
+    let Y = date.getFullYear();
+    let M = adjustZeros(date.getMonth() + 1);
+    let D = adjustZeros(date.getDate());
+
+    let h = adjustZeros(date.getHours());
+    let m = adjustZeros(date.getMinutes());
+    let s = adjustZeros(date.getUTCSeconds());
+    let ms = adjustZeros(date.getMilliseconds(), 3);
+
+    return `${D}.${M}.${Y} ${h}:${m}:${s}.${ms}`;
+}
+function log(...args) {
+    console.log(`[${formatDate(new Date)}]`, ...args);
+}
+
 let data = {
     status: 0,
     localIP: '127.0.0.1',
@@ -39,13 +62,13 @@ function createWindow() {
             let type = msg.split(' ')[1];
             let value = msg.split(' ').slice(2).join(' ');
             data[key] = type == 'number' ? +value : value;
-            console.log(`setData ${key} ${type} ${value}`);
+            log(`setData ${key} ${type} ${value}`);
         }
 
         else if (msg.startsWith('>')) {
             switch (msg.replace('>', '')) {
                 case 'connect': {
-                    console.log('Manual connect');
+                    log('Manual connect');
                     if (ws) {
                         setData('status', 0);
                         if (wsCon) wsCon.close(1000);
@@ -55,7 +78,7 @@ function createWindow() {
                     break;
                 }
                 case 'disconnect': {
-                    console.log('Manual disconnect');
+                    log('Manual disconnect');
                     setData('status', 0);
                     if (wsCon) {
                         wsCon.close(1000);
@@ -95,38 +118,24 @@ app.on('window-all-closed', () => {
 });
 
 process.on("uncaughtException", function (e) {
-    console.log(e);
+    log(e);
 });
 
 let wsBuffer = [];
-/**
- * @type {WebSocket.connection}
- */
 let wsCon;
 function wsSend(e, data = {}) {
-    if (e) data._e = e;
+    data._e = e;
     if (wsCon) wsCon.sendUTF(JSON.stringify(data));
     else wsBuffer.push(data);
 
 }
-function wsSendBinary(tunnelID, data) {
-    if (tunnelID) data = Buffer.from([...[...tunnelID].map(x => x.charCodeAt(0)), ...data]);
-    if (wsCon) {
-        wsCon.sendBytes(data);
-        console.log(tunnelID || data.subarray(0, 2).toString(), 'sent binary');
-    }
-    else wsBuffer.push(data);
-}
 
-/**
- * @type {Object<string, [ net.Socket, Buffer[] ]>}
- */
-let tunnels = {};
+let sockets = {};
 
 function dropSession() {
-    console.log('Dropped session');
+    log('Dropped session');
     setData('sessionID', null);
-    Object.values(tunnels).forEach(pair => pair[0].end());
+    Object.values(sockets).forEach(pair => pair[0].end());
     setData('sockets', 0);
     setData('recieved', 0);
     setData('sent', 0);
@@ -142,11 +151,12 @@ function wsConnect() {
     ws.on('connect', con => {
         setData('lastError', null);
         setData('status', 2);
-        console.log('WS connected');
+        log('WS connected');
         let lastAliveCheck = new Date;
         let aliveCheckInterval = setInterval(() => {
-            if (new Date - lastAliveCheck >= 20000) {
-                console.log('Server did not aliveCheck last 20 seconds. Connection will be closed');
+            let time = new Date - lastAliveCheck;
+            if (time >= 20000) {
+                log(`Server did not aliveCheck last 20 seconds (${(time / 1000).toFixed(1)} s). Reconnecting...`);
                 wsCon.close(4500);
             }
             else wsSend('aliveCheck');
@@ -167,7 +177,7 @@ function wsConnect() {
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
-                    console.log('Authentication timed out. Trying again in 3 seconds...')
+                    log('Authentication timed out. Trying again in 3 seconds...')
                     break;
                 }
                 case 4003: { // Selected port in use
@@ -175,7 +185,7 @@ function wsConnect() {
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
-                    console.log('Selected external port is in use. Trying again in 3 seconds...');
+                    log('Selected external port is in use. Trying again in 3 seconds...');
                     break;
                 }
                 case 4004: { // No ports available on this server
@@ -183,7 +193,7 @@ function wsConnect() {
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
-                    console.log('This server has no available ports. Trying again in 3 seconds...');
+                    log('This server has no available ports. Trying again in 3 seconds...');
                     break;
                 }
                 case 4005: { // Invalid session ID on ressurection
@@ -191,31 +201,31 @@ function wsConnect() {
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
-                    console.log('This session is no longer alive. Trying again in 3 seconds...');
+                    log('This session is no longer alive. Trying again in 3 seconds...');
                     break;
                 }
                 case 4006: { // aliveCheck timed out
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
-                    console.log('Server did not send aliveCheck in 20 seconds. Trying again in 3 seconds...');
+                    log('Server did not send aliveCheck in 20 seconds. Trying again in 3 seconds...');
                     break;
                 }
                 case 4007: { // Resurrect: wrong token
                     dropSession();
-                    console.log('Resurrect: wrong token. Connection will not be resurrected.');
+                    log('Resurrect: wrong token. Connection will not be resurrected.');
                     break;
                 }
                 case 4008: { // Auth failed
                     dropSession();
-                    console.log('Auth failed. Connection will not be resurrected.');
+                    log('Auth failed. Connection will not be resurrected.');
                     break;
                 }
                 default: {
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
-                    console.log('Something happened. Trying again in 3 seconds...');
+                    log('Something happened. Trying again in 3 seconds...');
                     break;
                 }
             }
@@ -224,90 +234,92 @@ function wsConnect() {
         con.on('error', e => console.error(`Error in WebSocket: ${e}`));
     
         con.on('message', raw => {
-            if (raw.type == 'binary') {
-                let id = raw.binaryData.subarray(0, 2).toString();
-                let data = raw.binaryData.slice(2);
-                if (tunnels[id]) {
-                    if (tunnels[id][0]) tunnels[id][0].write(data);
-                    else tunnels[id][1].push(data);
-                    console.log(id, 'received binary');
-                }
-                else console.log('unknown binary for ', id);
+            let msg;
+            try {
+                msg = JSON.parse(raw.utf8Data);
             }
-            else {
-                let msg;
-                try {
-                    msg = JSON.parse(raw.utf8Data);
+            catch (_e) { }
+    
+            if (!msg || !msg._e) return;
+            log(`${msg.sessionID}: ${msg._e}`);
+            switch (msg._e) {
+                case 'aliveCheck': {
+                    lastAliveCheck = new Date;
+                    log(data.sessionID + ': aliveCheck recieved');
+                    break;
                 }
-                catch (_e) { }
-        
-                if (!msg || !msg._e) return;
-                console.log(`${msg.sessionID}: ${msg._e}`);
-                switch (msg._e) {
-                    case 'aliveCheck': {
-                        lastAliveCheck = new Date;
-                        console.log(data.sessionID + ': aliveCheck recieved');
-                        break;
-                    }
-                    case 'session.created': {
-                        setData('sessionID', msg.id);
-                        console.log(`Session ${msg.id} on ext port ${msg.port} created`);
-                        setData('status', 3);
-                        setData('assignedExternalPort', msg.port);
-                        break;
-                    }
-                    case 'tunnel.created': {
-                        console.log('New tunnel ' + msg.id);
-                        tunnels[msg.id] = [null, []];
-
-                        let s2 = new net.Socket();
+                case 'session.created': {
+                    setData('sessionID', msg.id);
+                    log(`Session ${msg.id} on ext port ${msg.port} created`);
+                    setData('status', 3);
+                    setData('assignedExternalPort', msg.port);
+                    break;
+                }
+                case 'rps.create':
+                case 's2.create': {
+                    let s2 = new net.Socket();
+                    s2.connect(data.externalPort + 10000, data.server, () => {
+                        log('S2 opened ' + msg.id);
+                        if (sockets[msg.id]) {
+                            sockets[msg.id][0].end();
+                            sockets[msg.id][0] = s2;
+                        }
+                        else {
+                            sockets[msg.id] = [ s2, false, [] ];
+                            setData('sockets', Object.keys(sockets).length);
+                        }
+                        s2.write(msg.id);
+    
+                        let s3Alive = false;
+                        let buffer = [];
+                        let s3 = new net.Socket();
+    
                         let s2lastcount = 0;
                         let s2count = 0;
                         s2.on('data', chunk => {
-                            wsSendBinary(msg.id, chunk);
+                            if (s3Alive) s3.write(chunk);
+                            else buffer.push(chunk);
                             s2count += chunk.length;
                             if (s2count - s2lastcount > 1024 * 512) {
-                                setData('sent', s2count);
+                                setData('recieved', s2count);
                                 s2lastcount = s2count;
                             }
                         });
-                        s2.on('close', () => {
-                            if (tunnels[msg.id]) {
-                                delete tunnels[msg.id];
-                                wsSend('tunnel.close', {
-                                    id: msg.id
-                                });
-                                setData('sockets', Object.keys(tunnels).length);
-                                console.log('S2 closed ' + msg.id);
+                        s2.on('close', () => s3.end() && log('S2 closed ' + msg.id));
+                        s2.on('error', e => log(`Error in S3 #${msg.id}: ${e}`));
+    
+                        let s3lastcount = 0;
+                        let s3count = 0;
+                        s3.on('data', chunk => {
+                            s2.write(chunk);
+                            s3count += chunk.length;
+                            if (s3count - s3lastcount > 1024 * 512) {
+                                setData('sent', s3count);
+                                s3lastcount = s3count;
                             }
                         });
-                        s2.on('error', () => {});
-                        
-                        s2.connect(data.localPort, data.localIP, () => {
-                            console.log('S2 opened ' + msg.id, tunnels[msg.id]);
-                            if (!tunnels[msg.id]) {
-                                s2.end();
-                                return;
-                            }
-                            tunnels[msg.id][0] = s2;
-                            tunnels[msg.id][1].forEach(chunk => s2.write(chunk));
-                            tunnels[msg.id][1] = [];
+                        s3.on('close', () => {
+                            if (sockets[msg.id]) s2.end();
+                            delete sockets[msg.id];
+                            setData('sockets', Object.keys(sockets).length);
+                            log('S3 closed ' + msg.id);
                         });
-                        break;
-                    }
-                    case 'tunnel.closed': {
-                        if (tunnels[msg.id]) {
-                            if (tunnels[msg.id][0]) tunnels[msg.id][0].end();
-                            delete tunnels[msg.id];
-                        }
-                        console.log(`Tunnel #${msg.id} closed by server`);
-                        break;
-                    }
+                        s3.on('error', () => {});
+    
+                        s3.connect(data.localPort, data.localIP, () => {
+                            log('S3 opened ' + msg.id);
+                            s3Alive = true;
+                            sockets[msg.id][1] = s3;
+                            buffer.forEach(chunk => s3.write(chunk));
+                            buffer = [];
+                        });
+                    });
+                    break;
                 }
             }
         });
         wsCon = con;
-        wsBuffer.forEach(m => Buffer.isBuffer(m) ? wsSendBinary(null, m) : wsSend(null, m));
+        wsBuffer.forEach(m => wsSend(m._e, m));
         wsBuffer = [];
     });
     ws.on('connectFailed', e => {
@@ -324,7 +336,7 @@ function wsConnect() {
         wsSend('session.resurrect', {
             id: data.sessionID
         });
-        console.log('Resurrecting session', data.sessionID);
+        log('Resurrecting session', data.sessionID);
     }
     else {
         wsSend('session.create', {
@@ -334,6 +346,6 @@ function wsConnect() {
             login: data.authMethod == 'credentials' ? data.credsLogin : undefined,
             password: data.authMethod == 'credentials' ? data.credsPassword : undefined,
         });
-        console.log(`Creating new session for ${data.credsLogin}:${data.credsPassword.substr(0, 4)}***@${data.server}`);
+        log(`Creating new session for ${data.credsLogin}:${data.credsPassword.substr(0, 4)}***@${data.server}`);
     }
 }
