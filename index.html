@@ -6,7 +6,7 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- <link rel="stylesheet" href="metroui/css/metro-all.min.css"/> -->
+    <link rel="stylesheet" href="metroui/css/metro-all.min.css"/>
     <title>WorldPort</title>
 </head>
 <body>
@@ -27,18 +27,14 @@
             </label>
         </div>
         <div>
-            Auth:
-            <label><input type="radio" v-model="authMethod" value="anon" :disabled="status != 0"/> Anonymous</label>
-            <label><input type="radio" v-model="authMethod" value="credentials" :disabled="status != 0"/>Credentials</label>
-
-            <div>
-                Login: <input data-role="input" v-model="credsLogin" :disabled="status != 0 || authMethod != 'credentials'"/>
-                Password: <input data-role="input" type="password" v-model="credsPassword" :disabled="status != 0 || authMethod != 'credentials'"/>
-            </div>
+            Login: <input data-role="input" v-model="credsLogin" :disabled="status != 0 || authMethod != 'credentials'"/>
+            Password: <input data-role="input" type="password" v-model="credsPassword" :disabled="status != 0 || authMethod != 'credentials'"/>
         </div>
         <div>
-            <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && (isNaN(externalPort) || externalPort < 10000 || externalPort > 55535))"
+            <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && (isNaN(externalPort) || externalPort > 55535))"
                 @click="connect">{{ status == 0 ? 'Connect' : 'Disconnect' }}</button>
+                <button @click="showAbout">About</button>
+                <button @click="console.log('>devtools')">DevTools</button>
         </div>
         <hr/>
 

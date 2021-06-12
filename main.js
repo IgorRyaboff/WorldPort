@@ -1,7 +1,9 @@
 const { app, BrowserWindow } = require('electron');
+const Electron = require('electron');
 const path = require('path');
 const net = require('net');
 const WebSocket = require('websocket');
+const API_VERSION = '1.0';
 
 function formatDate(date) {
     const adjustZeros = (x, required = 2) => {
@@ -24,6 +26,7 @@ function formatDate(date) {
 }
 function log(...args) {
     console.log(`[${formatDate(new Date)}]`, ...args);
+    if (win) win.webContents.executeJavaScript(`console.log('[MAIN ${formatDate(new Date)}] ' + decodeURI('${[...args].map(x => encodeURI(x)).join(' ')}'))`);
 }
 
 let data = {
@@ -39,21 +42,28 @@ let data = {
     lastError: null,
     recieved: 0,
     sent: 0,
-    authMethod: 'anon',
+    authMethod: 'credentials',
     credsLogin: '',
-    credsPassword: ''
+    credsPassword: '',
+    changed: false,
+    closeWindow: false
 };
 function setData(key, value) {
     data[key] = value;
-    win.webContents.executeJavaScript(`setData('${key}', ${typeof value == 'string' ? `'${value}'` : value})`);
+    data.changed = true;
+    if (win) win.webContents.executeJavaScript(`setData('${key}', ${typeof value == 'string' ? `'${value}'` : value})`);
 }
 
 let win;
 function createWindow() {
     const wind = new BrowserWindow({
-        width: 600,
-        height: 350
+        width: 700,
+        height: 400,
+        minimizable: false,
+        maximizable: false,
+        resizable: false
     });
+    wind.setMenu(null);
     win = wind;
 
     wind.webContents.on('console-message', (_, __, msg) => {
@@ -91,24 +101,61 @@ function createWindow() {
                     break;
                 }
                 case 'init': {
-                    for (let i in data) setData(i, data[i]);
+                    if (data.changed) for (let i in data) setData(i, data[i]);
+                    else {
+                        let keys = [
+                            'status',
+                            'sockets',
+                            'sessionID',
+                            'lastError',
+                            'recieved',
+                            'sent'
+                        ];
+
+                        keys.forEach(i => setData(i, data[i]));
+                    }
+                    break;
+                }
+                case 'about': {
+                    let package = require('./package.json');
+                    Electron.dialog.showMessageBox(wind, {
+                        buttons: ['Close'],
+                        title: 'About WorldPort',
+                        message: `WorldPort v${package.version}`,
+                        detail: `API v${API_VERSION}\n\n© 2021-${package.version.substr(0, 4)} Igor Ryabov (https://github.com/IgorRyaboff)`,
+                    });
+                    break;
+                }
+                case 'devtools': {
+                    wind.webContents.openDevTools();
                     break;
                 }
             }
         }
     });
 
+    wind.on('close', e => {
+        if (data.closeWindow || data.status == 0) return;
+        else e.preventDefault();
+
+        Electron.dialog.showMessageBox(wind, {
+            buttons: ['Continue', 'Stay'],
+            title: 'WorldPort',
+            message: `You are about to leave WorldPort`,
+            detail: `You're still connected or connecting to WorldPort session. If you close WorldPort, all connections that go through it will be closed`,
+        }).then(value => {
+            if (value.response == 0) {
+                data.closeWindow = true;
+                wind.close();
+            }
+        });
+    });
+
     wind.loadFile('index.html');
 }
 
 app.whenReady().then(() => {
-    createWindow()
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow()
-        }
-    });
+    createWindow();
 });
 
 app.on('window-all-closed', () => {
@@ -162,11 +209,11 @@ function wsConnect() {
             else wsSend('aliveCheck');
         }, 10000);
 
-        con.on('close', code => {
+        con.on('close', (code, desc) => {
             ws = false;
             wsCon = false;
             clearInterval(aliveCheckInterval);
-            console.warn('WebSocket closed: ' + code);
+            console.warn('WebSocket closed: ' + code, desc && desc.startsWith('!') ? desc : '');
             setData('status', code == 1000 ? 0 : code);
             switch (code) {
                 case 1000: {
@@ -219,6 +266,8 @@ function wsConnect() {
                 case 4008: { // Auth failed
                     dropSession();
                     log('Auth failed. Connection will not be resurrected.');
+                    setData('status', 0);
+                    setData('lastError', 'Auth failed: wrong login or password');
                     break;
                 }
                 default: {
@@ -232,14 +281,14 @@ function wsConnect() {
         });
 
         con.on('error', e => console.error(`Error in WebSocket: ${e}`));
-    
+
         con.on('message', raw => {
             let msg;
             try {
                 msg = JSON.parse(raw.utf8Data);
             }
             catch (_e) { }
-    
+
             if (!msg || !msg._e) return;
             log(`${msg.sessionID}: ${msg._e}`);
             switch (msg._e) {
@@ -265,15 +314,15 @@ function wsConnect() {
                             sockets[msg.id][0] = s2;
                         }
                         else {
-                            sockets[msg.id] = [ s2, false, [] ];
+                            sockets[msg.id] = [s2, false, []];
                             setData('sockets', Object.keys(sockets).length);
                         }
                         s2.write(msg.id);
-    
+
                         let s3Alive = false;
                         let buffer = [];
                         let s3 = new net.Socket();
-    
+
                         let s2lastcount = 0;
                         let s2count = 0;
                         s2.on('data', chunk => {
@@ -287,7 +336,7 @@ function wsConnect() {
                         });
                         s2.on('close', () => s3.end() && log('S2 closed ' + msg.id));
                         s2.on('error', e => log(`Error in S3 #${msg.id}: ${e}`));
-    
+
                         let s3lastcount = 0;
                         let s3count = 0;
                         s3.on('data', chunk => {
@@ -304,8 +353,8 @@ function wsConnect() {
                             setData('sockets', Object.keys(sockets).length);
                             log('S3 closed ' + msg.id);
                         });
-                        s3.on('error', () => {});
-    
+                        s3.on('error', () => { });
+
                         s3.connect(data.localPort, data.localIP, () => {
                             log('S3 opened ' + msg.id);
                             s3Alive = true;
@@ -334,12 +383,14 @@ function wsConnect() {
     ws.connect(`ws://${data.server}${data.server.indexOf(':') == -1 ? ':100' : ''}`);
     if (data.sessionID) {
         wsSend('session.resurrect', {
+            v: API_VERSION,
             id: data.sessionID
         });
         log('Resurrecting session', data.sessionID);
     }
     else {
         wsSend('session.create', {
+            v: API_VERSION,
             externalPort: data.externalPort && !isNaN(data.externalPort) ? parseInt(data.externalPort) : null,
             forceExternalPort: Boolean(data.force),
             authMethod: data.authMethod,

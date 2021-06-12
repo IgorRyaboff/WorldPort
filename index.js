@@ -18,7 +18,7 @@ let vueApp = new Vue({
         lastError: null,
         recieved: 0,
         sent: 0,
-        authMethod: 'anon',
+        authMethod: 'credentials',
         credsLogin: '',
         credsPassword: ''
     },
@@ -46,6 +46,7 @@ let vueApp = new Vue({
                 case 4006: { // aliveCheck timed out
                     return 'AliveCheck timed out. Wait for reconnect...';
                 }
+                case 4008: return 'Auth failed';
                 case 0: return 'Not connected';
                 case 1: return 'Connecting...';
                 case 2: return 'Obtaining external port...';
@@ -68,9 +69,33 @@ let vueApp = new Vue({
                console.log('!credsPassword string ' + (this.authMethod == 'credentials' ? this.credsPassword : ''));
                console.log('!authMethod string ' + (this.authMethod == 'anon' ? 'credentials' : this.authMethod));
                console.log('>connect');
+
+               localStorage.last = JSON.stringify({
+                localIP: this.localIP,
+                localPort: this.localPort,
+                externalPort: this.externalPort,
+                force: this.force,
+                server: this.server,
+                authMethod: this.authMethod,
+                credsLogin: this.credsLogin
+               });
             }
             else console.log('>disconnect');
+        },
+        showAbout() {
+            console.log('>about');
         }
     }
 });
-console.log('>init')
+if (localStorage.last) {
+    try {
+        let data = JSON.parse(localStorage.last);
+        for (let i in data) vueApp[i] = data[i];
+    }
+    catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+        else delete localStorage.last;
+    }
+}
+
+console.log('>init');
