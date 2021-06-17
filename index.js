@@ -20,7 +20,11 @@ let vueApp = new Vue({
         sent: 0,
         authMethod: 'credentials',
         credsLogin: '',
-        credsPassword: ''
+        credsPassword: '',
+        receiving: false,
+        sending: false,
+        aliveCheckInterval: 0,
+        aliveCheckTimeout: Infinity
     },
     computed: {
         displayStatus() {
@@ -46,7 +50,7 @@ let vueApp = new Vue({
                 case 4006: { // aliveCheck timed out
                     return 'AliveCheck timed out. Wait for reconnect...';
                 }
-                case 4008: return 'Auth failed';
+                case 4009: return 'Could not obtain port in time. Wait for reconnect...';
                 case 0: return 'Not connected';
                 case 1: return 'Connecting...';
                 case 2: return 'Obtaining external port...';
@@ -60,25 +64,25 @@ let vueApp = new Vue({
     methods: {
         connect() {
             if (this.status == 0) {
-               console.log('!localIP string ' + this.localIP);
-               console.log('!localPort number ' + this.localPort);
-               console.log('!externalPort number ' + this.externalPort);
-               console.log('!force number ' + +this.force);
-               console.log('!server string ' + this.server);
-               console.log('!credsLogin string ' + (this.authMethod == 'credentials' ? this.credsLogin : 'anon'));
-               console.log('!credsPassword string ' + (this.authMethod == 'credentials' ? this.credsPassword : ''));
-               console.log('!authMethod string ' + (this.authMethod == 'anon' ? 'credentials' : this.authMethod));
-               console.log('>connect');
+                console.log('!localIP string ' + this.localIP);
+                console.log('!localPort number ' + this.localPort);
+                console.log('!externalPort number ' + (this.externalPort || 0));
+                console.log('!force number ' + +this.force);
+                console.log('!server string ' + this.server);
+                console.log('!credsLogin string ' + (this.authMethod == 'credentials' ? this.credsLogin : 'anon'));
+                console.log('!credsPassword string ' + (this.authMethod == 'credentials' ? this.credsPassword : ''));
+                console.log('!authMethod string ' + (this.authMethod == 'anon' ? 'credentials' : this.authMethod));
+                console.log('>connect');
 
-               localStorage.last = JSON.stringify({
-                localIP: this.localIP,
-                localPort: this.localPort,
-                externalPort: this.externalPort,
-                force: this.force,
-                server: this.server,
-                authMethod: this.authMethod,
-                credsLogin: this.credsLogin
-               });
+                localStorage.last = JSON.stringify({
+                    localIP: this.localIP,
+                    localPort: this.localPort,
+                    externalPort: this.externalPort,
+                    force: this.force,
+                    server: this.server,
+                    authMethod: this.authMethod,
+                    credsLogin: this.credsLogin
+                });
             }
             else console.log('>disconnect');
         },

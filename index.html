@@ -10,26 +10,39 @@
     <title>WorldPort</title>
 </head>
 <body>
-    <div id="app">
-        <div>
-            Server: <input data-role="input" v-model="server" :disabled="status != 0"/>
-        </div>
-        <div>
-            Local IP: <input data-role="input" v-model="localIP" :disabled="status != 0"/>
-        </div>
-        <div>
-            Local port: <input data-role="input" v-model="localPort" :disabled="status != 0"/>
-        </div>
-        <div>
-            External port: <input data-role="input" v-model="externalPort" :disabled="status != 0"/>
-            <label>
-                <input data-role="checkbox" type="checkbox" v-model="force" :disabled="status != 0"/> Force
-            </label>
-        </div>
-        <div>
-            Login: <input data-role="input" v-model="credsLogin" :disabled="status != 0 || authMethod != 'credentials'"/>
-            Password: <input data-role="input" type="password" v-model="credsPassword" :disabled="status != 0 || authMethod != 'credentials'"/>
-        </div>
+    <div id="app" style="margin: 0 5px">
+        <table>
+            <tr>
+                <td>Server:</td>
+                <td><input data-role="input" v-model="server" :disabled="status != 0"/></td>
+            </tr>
+            <tr>
+                <td>Local IP:</td>
+                <td><input data-role="input" v-model="localIP" :disabled="status != 0"/></td>
+            </tr>
+            <tr>
+                <td>Local port:</td>
+                <td><input data-role="input" v-model="localPort" :disabled="status != 0"/></td>
+            </tr>
+            <tr>
+                <td>External port:</td>
+                <td>
+                    <input data-role="input" v-model="externalPort" :disabled="status != 0"/>
+                    <label>
+                        <input data-role="checkbox" type="checkbox" v-model="force" :disabled="status != 0"/>
+                        Force
+                    </label>
+                </td>
+            </tr>
+            <tr>
+                <td>Login:</td>
+                <td><input data-role="input" v-model="credsLogin" :disabled="status != 0 || authMethod != 'credentials'"/></td>
+            </tr>
+            <tr>
+                <td>Password:</td>
+                <td><input data-role="input" type="password" v-model="credsPassword" :disabled="status != 0 || authMethod != 'credentials'"/></td>
+            </tr>
+        </table>
         <div>
             <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && (isNaN(externalPort) || externalPort > 55535))"
                 @click="connect">{{ status == 0 ? 'Connect' : 'Disconnect' }}</button>
@@ -48,14 +61,26 @@
             Session ID: {{ sessionID }}
         </div>
         <div v-if="status == 3">
-            Exposing on <b>{{server}}:{{ assignedExternalPort }}</b>
+            Exposing on <b style="user-select: all;">{{server}}:{{ assignedExternalPort }}</b>
         </div>
         <div v-if="status == 3">
             {{ sockets }} sockets open
         </div>
         <div v-if="status == 3">
-            <div>received: {{ (received / 1024 / 1024).toFixed(1) }} MB</div>
-            <div>Sent: {{ (sent / 1024 / 1024).toFixed(1) }} MB</div>
+            <div>
+                <span :style="{ color: receiving ? 'green' : 'lightgrey' }">\/</span>
+                Received: {{ (received / 1024 / 1024).toFixed(1) }} MB
+            </div>
+            <div>
+                <span :style="{ color: sending ? 'red' : 'lightgrey' }">/\</span>
+                Sent: {{ (sent / 1024 / 1024).toFixed(1) }} MB
+            </div>
+        </div>
+        <div v-if="status == 3">
+            AliveCheck interval: {{ aliveCheckInterval }} ms
+        </div>
+        <div v-if="status == 3">
+            AliveCheck timeout: {{ aliveCheckTimeout }} ms
         </div>
     </div>
     

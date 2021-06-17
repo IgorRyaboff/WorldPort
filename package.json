@@ -1,6 +1,6 @@
 {
     "name": "worldport",
-    "version": "2021.6.17-hf.0",
+    "version": "2021.6.17-alpha.1",
     "description": "Simple to use reverse proxy",
     "main": "main.js",
     "scripts": {
@@ -20,6 +20,7 @@
     },
     "homepage": "https://github.com/IgorRyaboff/WorldPort#readme",
     "dependencies": {
+        "args-parser": "^1.2.0",
         "websocket": "^1.0.34"
     },
     "devDependencies": {

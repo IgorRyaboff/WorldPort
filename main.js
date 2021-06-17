@@ -3,7 +3,16 @@ const Electron = require('electron');
 const path = require('path');
 const net = require('net');
 const WebSocket = require('websocket');
+const argsParser = require('args-parser');
 const API_VERSION = '1.0';
+
+let cliArgs = argsParser(process.argv);
+console.log(cliArgs);
+
+function getVersion() {
+    const package = require('./package.json');
+    return app.isPackaged ? package.version : 'UNPACKAGED';
+}
 
 function formatDate(date) {
     const adjustZeros = (x, required = 2) => {
@@ -24,9 +33,15 @@ function formatDate(date) {
 
     return `${D}.${M}.${Y} ${h}:${m}:${s}.${ms}`;
 }
+function unicodeEscape(str) {
+    for (var result = '', index = 0, charCode; !isNaN(charCode = str.charCodeAt(index++));) {
+        result += '\\u' + ('0000' + charCode.toString(16)).slice(-4);
+    }
+    return result;
+}
 function log(...args) {
     console.log(`[${formatDate(new Date)}]`, ...args);
-    if (win) win.webContents.executeJavaScript(`console.log('[MAIN ${formatDate(new Date)}] ' + decodeURI('${[...args].map(x => encodeURI(x)).join(' ')}'))`);
+    if (win) win.webContents.executeJavaScript(`console.log('[MAIN ${formatDate(new Date)}] ' + decodeURI('${[...args].map(x => unicodeEscape(String(x))).join(' ')}'))`);
 }
 
 let data = {
@@ -46,30 +61,38 @@ let data = {
     credsLogin: '',
     credsPassword: '',
     changed: false,
-    closeWindow: false
+    closeWindow: false,
+    receiving: false,
+    sending: false,
+    lastReceive: 0,
+    lastSend: 0,
+    aliveCheckInterval: 0,
+    aliveCheckTimeout: Infinity
 };
 function setData(key, value) {
     data[key] = value;
     data.changed = true;
     if (win) win.webContents.executeJavaScript(`setData('${key}', ${typeof value == 'string' ? `'${value}'` : value})`);
-    if (key == 'status') updateTrayTitle();
+
+    updateTray();
+    trayMenuTpl[1].enabled = data.status == 3;
+    trayMenuTpl[1].label = data.status == 3 ? `Copy "${data.server}:${data.assignedExternalPort}"` : 'No external address';
+    updateTray();
 }
 
 let win;
 let winShowing = true;
 function createWindow() {
-    const wind = new BrowserWindow({
-        width: 700,
-        height: 400,
-        //minimizable: false,
+    win = new BrowserWindow({
+        width: 800,
+        height: 600,
         maximizable: false,
         resizable: false,
-        icon: './logo.png'
+        icon: './logo.ico'
     });
-    wind.setMenu(null);
-    win = wind;
+    win.setMenu(null);
 
-    wind.webContents.on('console-message', (_, __, msg) => {
+    win.webContents.on('console-message', (_, __, msg) => {
         if (msg.startsWith('!')) {
             let key = msg.replace('!', '').split(' ')[0];
             let type = msg.split(' ')[1];
@@ -86,6 +109,7 @@ function createWindow() {
                         setData('status', 0);
                         if (wsCon) wsCon.close(1000);
                         else ws.abort();
+                        ws = null;
                     }
                     else wsConnect();
                     break;
@@ -120,43 +144,44 @@ function createWindow() {
                     break;
                 }
                 case 'about': {
-                    let package = require('./package.json');
-                    Electron.dialog.showMessageBox(wind, {
+                    Electron.dialog.showMessageBox(win, {
                         buttons: ['Close'],
                         title: 'About WorldPort',
-                        message: `WorldPort v${package.version}`,
-                        detail: `API v${API_VERSION}\n\n© 2021-${package.version.substr(0, 4)} Igor Ryabov (https://github.com/IgorRyaboff)`,
+                        message: `WorldPort v${getVersion()}`,
+                        detail: `API v${API_VERSION}\n\n© 2021-${getVersion().substr(0, 4)} Igor Ryabov (https://github.com/IgorRyaboff)`,
                     });
                     break;
                 }
                 case 'devtools': {
-                    wind.webContents.openDevTools();
+                    win.webContents.openDevTools();
                     break;
                 }
             }
         }
     });
 
-    wind.on('close', e => {
+    win.on('close', e => {
         e.preventDefault();
         hideWindow();
     });
 
-    wind.on('minimize', () => {
+    win.on('minimize', () => {
         console.log('MINIMIZING');
     });
 
-    wind.on('hide', () => {
-        trayMenu.items[0].enabled = true;
+    win.on('hide', () => {
+        trayMenuTpl[0].enabled = true;
+        updateTray();
         winShowing = false;
     });
 
-    wind.on('show', () => {
-        trayMenu.items[0].enabled = false;
+    win.on('show', () => {
+        trayMenuTpl[0].enabled = false;
+        updateTray();
         winShowing = true;
     });
 
-    wind.loadFile('index.html');
+    win.loadFile('index.html');
 }
 
 let hideNotification = false;
@@ -187,33 +212,51 @@ let tray;
  * @type {Electron.Menu}
  */
 let trayMenu;
+let trayMenuTpl = [
+    { label: 'Open window', enabled: false, click() { showWindow() } },
+    { label: 'No external address', enabled: false, click() { Electron.clipboard.writeText(`${data.server}:${data.assignedExternalPort}`, 'clipboard') } },
+    { label: 'Quit', click() { process.exit() } }
+];
 app.whenReady().then(() => {
     createWindow();
-    tray = new Electron.Tray(path.join(__dirname, 'logo.png'));
-    trayMenu = Electron.Menu.buildFromTemplate([
-        { label: 'Open window', enabled: false, click() { showWindow() } },
-        { label: 'Quit', click() { process.exit() } }
-    ]);
-    tray.setContextMenu(trayMenu);
-    updateTrayTitle();
+    tray = new Electron.Tray(path.join(__dirname, 'logo.ico'));
+    global.t = tray;
+    updateTray();
     tray.on('double-click', () => winShowing || rdpRunning ? hideWindow() : showWindow());
 });
 
-function updateTrayTitle() {
+function updateTray() {
     let txt;
-    if (data.status == 0) txt = 'Not connected';
-    else if (data.status == 1) txt = 'Connecting...';
-    else if (data.status == 2) txt = 'Connecting...';
-    else if (data.status == 3) txt = `Exposing ${data.localIP}:${data.localPort} via ${data.server}:${data.assignedExternalPort}`;
-    else txt = 'Reconnecting...';
-    tray.setToolTip(`WorldPort v${require('./package.json').version}\n${txt}`);
+    let icon;
+    if (data.status == 0) {
+        txt = 'Not connected';
+        icon = 'logo';
+    }
+    else if (data.status == 1) {
+        txt = 'Connecting...';
+        icon = 'logo';
+    }
+    else if (data.status == 2) {
+        txt = 'Connecting...';
+        icon = 'logo';
+    }
+    else if (data.status == 3) {
+        txt = `Exposing ${data.localIP}:${data.localPort} via ${data.server}:${data.assignedExternalPort}`;
+        icon = 'logoActive'
+    }
+    else {
+        txt = 'Reconnecting...';
+        icon = 'logoErrored';
+    }
+    tray.setToolTip(`WorldPort v${getVersion()}\n${txt}`);
+    
+    trayMenu = Electron.Menu.buildFromTemplate(trayMenuTpl);
+    tray.setContextMenu(trayMenu);
+    tray.setImage(path.join(__dirname, icon + '.ico'));
 }
 
 app.on('window-all-closed', e => {
-    return e.preventDefault();
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
+    e.preventDefault();
 });
 
 process.on("uncaughtException", function (e) {
@@ -253,19 +296,25 @@ function wsConnect() {
         setData('status', 2);
         log('WS connected');
         let lastAliveCheck = new Date;
-        let aliveCheckInterval = setInterval(() => {
+        let aliveCheckInterval;
+        let aliveCheckTimeoutChecker = setInterval(() => {
             let time = new Date - lastAliveCheck;
-            if (time >= 20000) {
-                log(`Server did not aliveCheck last 20 seconds (${(time / 1000).toFixed(1)} s). Reconnecting...`);
+            if (time >= data.aliveCheckTimeout) {
+                log(`Server did not aliveCheck last ${data.aliveCheckTimeout} ms (${(time / 1000).toFixed(1)} s). Reconnecting...`);
                 wsCon.close(4500);
             }
-            else wsSend('aliveCheck');
-        }, 10000);
+        }, 1000);
+        let portObtainTO = setTimeout(() => {
+            wsCon.close(4009);
+        }, 5000);
 
         con.on('close', (code, desc) => {
             ws = false;
             wsCon = false;
             clearInterval(aliveCheckInterval);
+            clearInterval(aliveCheckTimeoutChecker);
+            clearInterval(portObtainTO);
+            setData('aliveCheckTimeout', Infinity);
             console.warn('WebSocket closed: ' + code, desc && desc.startsWith('!') ? desc : '');
             setData('status', code == 1000 ? 0 : code);
             switch (code) {
@@ -323,6 +372,13 @@ function wsConnect() {
                     setData('lastError', 'Auth failed: wrong login or password');
                     break;
                 }
+                case 4009: { // Port obrain timeout
+                    reconTO = setTimeout(() => {
+                        wsConnect();
+                    }, 3000);
+                    log('Port obtain timed out. Trying again in 3 seconds...');
+                    break;
+                }
                 default: {
                     reconTO = setTimeout(() => {
                         wsConnect();
@@ -354,12 +410,18 @@ function wsConnect() {
                     log(`Session ${msg.id} on ext port ${msg.port} created`);
                     setData('status', 3);
                     setData('assignedExternalPort', msg.port);
+                    setData('aliveCheckInterval', msg.aliveCheckInterval);
+                    setData('aliveCheckTimeout', msg.aliveCheckTimeout);
+                    aliveCheckInterval = setInterval(() => {
+                        wsSend('aliveCheck');
+                    }, msg.aliveCheckInterval);
+                    clearTimeout(portObtainTO);
                     break;
                 }
                 case 'rps.create':
                 case 's2.create': {
                     let s2 = new net.Socket();
-                    s2.connect(data.assignedExternalPort + 10000, data.server, () => {
+                    s2.connect(data.assignedExternalPort + 10000, data.server.split(':')[0], () => {
                         log('S2 opened ' + msg.id);
                         if (sockets[msg.id]) {
                             sockets[msg.id][0].end();
@@ -378,7 +440,6 @@ function wsConnect() {
                         let s2lastcount = 0;
                         let s2count = 0;
                         s2.on('data', chunk => {
-                            //log('S2 >> S3', [...chunk.slice(0, 10)].join(' '));
                             if (s3Alive) s3.write(chunk);
                             else buffer.push(chunk);
                             s2count += chunk.length;
@@ -386,6 +447,7 @@ function wsConnect() {
                                 setData('received', s2count);
                                 s2lastcount = s2count;
                             }
+                            data.lastReceive = new Date;
                         });
                         s2.on('close', () => s3.end() && log('S2 closed ' + msg.id));
                         s2.on('error', e => log(`Error in S3 #${msg.id}: ${e}`));
@@ -393,18 +455,18 @@ function wsConnect() {
                         let s3lastcount = 0;
                         let s3count = 0;
                         s3.on('data', chunk => {
-                            if (!rdpRunning && chunk.slice(0, 4).compare(Buffer.from([3, 0, 0, 19])) == 0) {
+                            if (!rdpRunning && !cliArgs.ignoreRDP && chunk.slice(0, 4).compare(Buffer.from([3, 0, 0, 19])) == 0) {
                                 rdpRunning = true;
                                 if (winShowing) hideWindow();
                                 log('RDP detected, window locked');
                             }
-                            //log('S2 << S3', [...chunk.slice(0, 10)].join(' '));
                             s2.write(chunk);
                             s3count += chunk.length;
                             if (s3count - s3lastcount > 1024 * 512) {
                                 setData('sent', s3count);
                                 s3lastcount = s3count;
                             }
+                            data.lastSend = new Date;
                         });
                         s3.on('close', () => {
                             if (sockets[msg.id]) s2.end();
@@ -460,3 +522,11 @@ function wsConnect() {
         log(`Creating new session for ${data.credsLogin}:${data.credsPassword.substr(0, 4)}***@${data.server}`);
     }
 }
+
+setInterval(() => {
+    let receiving = new Date - data.lastReceive < 500;
+    let sending = new Date - data.lastSend < 500;
+
+    if (receiving != data.receiving) setData('receiving', receiving);
+    if (sending != data.sending) setData('sending', sending);
+}, 200);
