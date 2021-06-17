@@ -189,14 +189,12 @@ let tray;
 let trayMenu;
 app.whenReady().then(() => {
     createWindow();
-    global.w = win;
     tray = new Electron.Tray(path.join(__dirname, 'logo.png'));
-    console.log(path.join(__dirname, 'logo.png'));
     trayMenu = Electron.Menu.buildFromTemplate([
-        { label: 'Open window', click() { showWindow() } },
+        { label: 'Open window', enabled: false, click() { showWindow() } },
         { label: 'Quit', click() { process.exit() } }
     ]);
-    tray.setToolTip('This is my application.');
+    tray.setContextMenu(trayMenu);
     updateTrayTitle();
     tray.on('double-click', () => winShowing || rdpRunning ? hideWindow() : showWindow());
 });
