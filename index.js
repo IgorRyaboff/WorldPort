@@ -16,7 +16,7 @@ let vueApp = new Vue({
         sockets: 0,
         sessionID: null,
         lastError: null,
-        recieved: 0,
+        received: 0,
         sent: 0,
         authMethod: 'credentials',
         credsLogin: '',

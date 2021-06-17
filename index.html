@@ -54,7 +54,7 @@
             {{ sockets }} sockets open
         </div>
         <div v-if="status == 3">
-            <div>Recieved: {{ (recieved / 1024 / 1024).toFixed(1) }} MB</div>
+            <div>received: {{ (received / 1024 / 1024).toFixed(1) }} MB</div>
             <div>Sent: {{ (sent / 1024 / 1024).toFixed(1) }} MB</div>
         </div>
     </div>

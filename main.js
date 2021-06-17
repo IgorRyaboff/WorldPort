@@ -40,7 +40,7 @@ let data = {
     sockets: 0,
     sessionID: null,
     lastError: null,
-    recieved: 0,
+    received: 0,
     sent: 0,
     authMethod: 'credentials',
     credsLogin: '',
@@ -52,16 +52,19 @@ function setData(key, value) {
     data[key] = value;
     data.changed = true;
     if (win) win.webContents.executeJavaScript(`setData('${key}', ${typeof value == 'string' ? `'${value}'` : value})`);
+    if (key == 'status') updateTrayTitle();
 }
 
 let win;
+let winShowing = true;
 function createWindow() {
     const wind = new BrowserWindow({
         width: 700,
         height: 400,
-        minimizable: false,
+        //minimizable: false,
         maximizable: false,
-        resizable: false
+        resizable: false,
+        icon: './logo.png'
     });
     wind.setMenu(null);
     win = wind;
@@ -108,7 +111,7 @@ function createWindow() {
                             'sockets',
                             'sessionID',
                             'lastError',
-                            'recieved',
+                            'received',
                             'sent'
                         ];
 
@@ -135,32 +138,83 @@ function createWindow() {
     });
 
     wind.on('close', e => {
-        if (data.closeWindow || data.status == 0) return;
-        else e.preventDefault();
+        e.preventDefault();
+        hideWindow();
+    });
 
-        Electron.dialog.showMessageBox(wind, {
-            buttons: ['Continue', 'Stay'],
-            title: 'WorldPort',
-            message: `You are about to leave WorldPort`,
-            detail: `You're still connected or connecting to WorldPort session. If you close WorldPort, all connections that go through it will be closed`,
-        }).then(value => {
-            if (value.response == 0) {
-                data.closeWindow = true;
-                wind.close();
-            }
-        });
+    wind.on('minimize', () => {
+        console.log('MINIMIZING');
+    });
+
+    wind.on('hide', () => {
+        trayMenu.items[0].enabled = true;
+        winShowing = false;
+    });
+
+    wind.on('show', () => {
+        trayMenu.items[0].enabled = false;
+        winShowing = true;
     });
 
     wind.loadFile('index.html');
 }
 
+let hideNotification = false;
+function showWindow() {
+    if (rdpRunning) Electron.dialog.showMessageBox(null, {
+        buttons: ['OK'],
+        title: 'WorldPort',
+        message: `RDP detected`,
+        type: 'warning',
+        detail: `WorldPort detected RDP connection that go through it. Using GUI right now can cause WorldPort to hang up\nEnd the session to open window`,
+    });
+    else win.show();
+}
+function hideWindow() {
+    win.hide();
+    if (!hideNotification) {
+        new Electron.Notification({ title: 'WorldPort is still running', body: 'Use tray to exit or reopen the window' }).show();
+        hideNotification = true;
+    }
+}
+
+/**
+ * @type {Electron.Tray}
+ */
+let tray;
+
+/**
+ * @type {Electron.Menu}
+ */
+let trayMenu;
 app.whenReady().then(() => {
     createWindow();
+    global.w = win;
+    tray = new Electron.Tray(path.join(__dirname, 'logo.png'));
+    console.log(path.join(__dirname, 'logo.png'));
+    trayMenu = Electron.Menu.buildFromTemplate([
+        { label: 'Open window', click() { showWindow() } },
+        { label: 'Quit', click() { process.exit() } }
+    ]);
+    tray.setToolTip('This is my application.');
+    updateTrayTitle();
+    tray.on('double-click', () => winShowing || rdpRunning ? hideWindow() : showWindow());
 });
 
-app.on('window-all-closed', () => {
+function updateTrayTitle() {
+    let txt;
+    if (data.status == 0) txt = 'Not connected';
+    else if (data.status == 1) txt = 'Connecting...';
+    else if (data.status == 2) txt = 'Connecting...';
+    else if (data.status == 3) txt = `Exposing ${data.localIP}:${data.localPort} via ${data.server}:${data.assignedExternalPort}`;
+    else txt = 'Reconnecting...';
+    tray.setToolTip(`WorldPort v${require('./package.json').version}\n${txt}`);
+}
+
+app.on('window-all-closed', e => {
+    return e.preventDefault();
     if (process.platform !== 'darwin') {
-        app.quit()
+        app.quit();
     }
 });
 
@@ -184,12 +238,13 @@ function dropSession() {
     setData('sessionID', null);
     Object.values(sockets).forEach(pair => pair[0].end());
     setData('sockets', 0);
-    setData('recieved', 0);
+    setData('received', 0);
     setData('sent', 0);
 }
 
 let reconTO;
 let ws;
+let rdpRunning = false;
 function wsConnect() {
     if (ws) return;
     setData('status', 1);
@@ -294,7 +349,6 @@ function wsConnect() {
             switch (msg._e) {
                 case 'aliveCheck': {
                     lastAliveCheck = new Date;
-                    log(data.sessionID + ': aliveCheck recieved');
                     break;
                 }
                 case 'session.created': {
@@ -307,7 +361,7 @@ function wsConnect() {
                 case 'rps.create':
                 case 's2.create': {
                     let s2 = new net.Socket();
-                    s2.connect(data.externalPort + 10000, data.server, () => {
+                    s2.connect(data.assignedExternalPort + 10000, data.server, () => {
                         log('S2 opened ' + msg.id);
                         if (sockets[msg.id]) {
                             sockets[msg.id][0].end();
@@ -326,11 +380,12 @@ function wsConnect() {
                         let s2lastcount = 0;
                         let s2count = 0;
                         s2.on('data', chunk => {
+                            //log('S2 >> S3', [...chunk.slice(0, 10)].join(' '));
                             if (s3Alive) s3.write(chunk);
                             else buffer.push(chunk);
                             s2count += chunk.length;
                             if (s2count - s2lastcount > 1024 * 512) {
-                                setData('recieved', s2count);
+                                setData('received', s2count);
                                 s2lastcount = s2count;
                             }
                         });
@@ -340,6 +395,12 @@ function wsConnect() {
                         let s3lastcount = 0;
                         let s3count = 0;
                         s3.on('data', chunk => {
+                            if (!rdpRunning && chunk.slice(0, 4).compare(Buffer.from([3, 0, 0, 19])) == 0) {
+                                rdpRunning = true;
+                                if (winShowing) hideWindow();
+                                log('RDP detected, window locked');
+                            }
+                            //log('S2 << S3', [...chunk.slice(0, 10)].join(' '));
                             s2.write(chunk);
                             s3count += chunk.length;
                             if (s3count - s3lastcount > 1024 * 512) {
@@ -352,6 +413,7 @@ function wsConnect() {
                             delete sockets[msg.id];
                             setData('sockets', Object.keys(sockets).length);
                             log('S3 closed ' + msg.id);
+                            if (Object.keys(sockets).length == 0) rdpRunning = false;
                         });
                         s3.on('error', () => { });
 
