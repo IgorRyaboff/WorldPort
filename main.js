@@ -2,12 +2,25 @@ const { app, BrowserWindow } = require('electron');
 const Electron = require('electron');
 const path = require('path');
 const net = require('net');
+const tls = require('tls');
 const WebSocket = require('websocket');
-const argsParser = require('args-parser');
+const fs = require('fs');
 const API_VERSION = '1.0';
 
-let cliArgs = argsParser(process.argv);
-console.log(cliArgs);
+const dataDir = path.join(require('os').homedir(), '.worldport');
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
+let config = {
+    lastData: {
+        server: null,
+        externalPort: null,
+        localIP: 'localhost',
+        localPort: null,
+        forceExternalPort: false,
+        login: null
+    },
+    ignoreSSL: {},
+    lockWindowOnRDP: true
+};
 
 function getVersion() {
     const package = require('./package.json');
@@ -41,7 +54,7 @@ function unicodeEscape(str) {
 }
 function log(...args) {
     console.log(`[${formatDate(new Date)}]`, ...args);
-    if (win) win.webContents.executeJavaScript(`console.log('[MAIN ${formatDate(new Date)}] ' + decodeURI('${[...args].map(x => unicodeEscape(String(x))).join(' ')}'))`);
+    if (typeof win == 'object') win.webContents.executeJavaScript(`console.log('[MAIN ${formatDate(new Date)}] ' + decodeURI('${[...args].map(x => unicodeEscape(String(x))).join(' ')}'))`);
 }
 
 let data = {
@@ -67,7 +80,9 @@ let data = {
     lastReceive: 0,
     lastSend: 0,
     aliveCheckInterval: 0,
-    aliveCheckTimeout: Infinity
+    aliveCheckTimeout: Infinity,
+    bandwidthLimit: 0,
+    allowDevTools: false
 };
 function setData(key, value) {
     data[key] = value;
@@ -76,7 +91,7 @@ function setData(key, value) {
 
     updateTray();
     trayMenuTpl[1].enabled = data.status == 3;
-    trayMenuTpl[1].label = data.status == 3 ? `Copy "${data.server}:${data.assignedExternalPort}"` : 'No external address';
+    trayMenuTpl[1].label = data.status == 3 ? `Copy "${data.server.split(':')[0]}:${data.assignedExternalPort}"` : 'No external address';
     updateTray();
 }
 
@@ -88,7 +103,8 @@ function createWindow() {
         height: 600,
         maximizable: false,
         resizable: false,
-        icon: './logo.ico'
+        icon: './logo.ico',
+        show: !process.argv.some(x => x.toLowerCase() == '-minimized')
     });
     win.setMenu(null);
 
@@ -128,19 +144,7 @@ function createWindow() {
                     break;
                 }
                 case 'init': {
-                    if (data.changed) for (let i in data) setData(i, data[i]);
-                    else {
-                        let keys = [
-                            'status',
-                            'sockets',
-                            'sessionID',
-                            'lastError',
-                            'received',
-                            'sent'
-                        ];
-
-                        keys.forEach(i => setData(i, data[i]));
-                    }
+                    for (let i in data) setData(i, data[i]);
                     break;
                 }
                 case 'about': {
@@ -214,7 +218,7 @@ let tray;
 let trayMenu;
 let trayMenuTpl = [
     { label: 'Open window', enabled: false, click() { showWindow() } },
-    { label: 'No external address', enabled: false, click() { Electron.clipboard.writeText(`${data.server}:${data.assignedExternalPort}`, 'clipboard') } },
+    { label: 'No external address', enabled: false, click() { Electron.clipboard.writeText(`${data.server.split(':')[0]}:${data.assignedExternalPort}`, 'clipboard') } },
     { label: 'Quit', click() { process.exit() } }
 ];
 app.whenReady().then(() => {
@@ -226,6 +230,7 @@ app.whenReady().then(() => {
 });
 
 function updateTray() {
+    if (!tray) return;
     let txt;
     let icon;
     if (data.status == 0) {
@@ -241,7 +246,7 @@ function updateTray() {
         icon = 'logo';
     }
     else if (data.status == 3) {
-        txt = `Exposing ${data.localIP}:${data.localPort} via ${data.server}:${data.assignedExternalPort}`;
+        txt = `Exposing ${data.localIP}:${data.localPort} via ${data.server.split(':')[0]}:${data.assignedExternalPort}`;
         icon = 'logoActive'
     }
     else {
@@ -289,11 +294,23 @@ let rdpRunning = false;
 function wsConnect() {
     if (ws) return;
     setData('status', 1);
+    let hostname = data.server.split(':')[0].toLowerCase();
+    if (config.ignoreSSL && config.ignoreSSL[hostname]) process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = 0;
+    else process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = 1;
     ws = new WebSocket.client();
     global.ws = ws;
     ws.on('connect', con => {
         setData('lastError', null);
         setData('status', 2);
+        config.lastData = {
+            server: data.server || null,
+            externalPort: data.externalPort || null,
+            localIP: data.localIP || null,
+            localPort: data.localPort || null,
+            forceExternalPort: !!data.forceExternalPort,
+            login: data.login || null
+        };
+        fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(config, null, 4));
         log('WS connected');
         let lastAliveCheck = new Date;
         let aliveCheckInterval;
@@ -315,7 +332,7 @@ function wsConnect() {
             clearInterval(aliveCheckTimeoutChecker);
             clearInterval(portObtainTO);
             setData('aliveCheckTimeout', Infinity);
-            console.warn('WebSocket closed: ' + code, desc && desc.startsWith('!') ? desc : '');
+            log('WebSocket closed: ' + code, desc && desc.startsWith('!') ? desc : '');
             setData('status', code == 1000 ? 0 : code);
             switch (code) {
                 case 1000: {
@@ -362,7 +379,10 @@ function wsConnect() {
                 }
                 case 4007: { // Resurrect: wrong token
                     dropSession();
-                    log('Resurrect: wrong token. Connection will not be resurrected.');
+                    reconTO = setTimeout(() => {
+                        wsConnect();
+                    }, 3000);
+                    log('Resurrect: wrong token. Trying again in 3 seconds...');
                     break;
                 }
                 case 4008: { // Auth failed
@@ -372,7 +392,7 @@ function wsConnect() {
                     setData('lastError', 'Auth failed: wrong login or password');
                     break;
                 }
-                case 4009: { // Port obrain timeout
+                case 4009: { // Port obtain timeout
                     reconTO = setTimeout(() => {
                         wsConnect();
                     }, 3000);
@@ -399,7 +419,7 @@ function wsConnect() {
             catch (_e) { }
 
             if (!msg || !msg._e) return;
-            log(`${msg.sessionID}: ${msg._e}`);
+            log(`${data.sessionID}: ${msg._e}`);
             switch (msg._e) {
                 case 'aliveCheck': {
                     lastAliveCheck = new Date;
@@ -412,16 +432,15 @@ function wsConnect() {
                     setData('assignedExternalPort', msg.port);
                     setData('aliveCheckInterval', msg.aliveCheckInterval);
                     setData('aliveCheckTimeout', msg.aliveCheckTimeout);
+                    setData('bandwidthLimit', msg.bandwidthLimit);
                     aliveCheckInterval = setInterval(() => {
                         wsSend('aliveCheck');
                     }, msg.aliveCheckInterval);
                     clearTimeout(portObtainTO);
                     break;
                 }
-                case 'rps.create':
                 case 's2.create': {
-                    let s2 = new net.Socket();
-                    s2.connect(data.assignedExternalPort + 10000, data.server.split(':')[0], () => {
+                    let s2 = tls.connect(data.assignedExternalPort + 10000, data.server.split(':')[0], () => {
                         log('S2 opened ' + msg.id);
                         if (sockets[msg.id]) {
                             sockets[msg.id][0].end();
@@ -455,7 +474,7 @@ function wsConnect() {
                         let s3lastcount = 0;
                         let s3count = 0;
                         s3.on('data', chunk => {
-                            if (!rdpRunning && !cliArgs.ignoreRDP && chunk.slice(0, 4).compare(Buffer.from([3, 0, 0, 19])) == 0) {
+                            if (!rdpRunning && config.lockWindowOnRDP && chunk.slice(0, 4).compare(Buffer.from([3, 0, 0, 19])) == 0) {
                                 rdpRunning = true;
                                 if (winShowing) hideWindow();
                                 log('RDP detected, window locked');
@@ -502,7 +521,7 @@ function wsConnect() {
         }, 3000);
     });
 
-    ws.connect(`ws://${data.server}${data.server.indexOf(':') == -1 ? ':100' : ''}`);
+    ws.connect(`wss://${data.server}${data.server.indexOf(':') == -1 ? ':100' : ''}`);
     if (data.sessionID) {
         wsSend('session.resurrect', {
             v: API_VERSION,
@@ -530,3 +549,14 @@ setInterval(() => {
     if (receiving != data.receiving) setData('receiving', receiving);
     if (sending != data.sending) setData('sending', sending);
 }, 200);
+
+
+if (fs.existsSync(path.join(dataDir, 'config.json'))) config = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json')).toString());
+for (let i in config.lastData) setData(i, config.lastData[i]);
+setData('allowDevTools', config.allowDevTools || false);
+if (config.ignoreSSL && Object.values(config.ignoreSSL).some(x => x === true)) {
+    log('config.verifySSL: SSL cert verification disabled for some hosts. You should only disable it for testing on your own server with self-signed certificate');
+}
+if (config.allowDevTools) log('config.allowDevTools: Chrome devtools enabled');
+if (!config.lockWindowOnRDP) log('config.lockWindowOnRDP: RDP hangup glitch prevention disabled');
+if (process.argv.some(x => x.toLowerCase() == '-minimized')) log('CLI args: Starting minimized');

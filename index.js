@@ -24,7 +24,9 @@ let vueApp = new Vue({
         receiving: false,
         sending: false,
         aliveCheckInterval: 0,
-        aliveCheckTimeout: Infinity
+        aliveCheckTimeout: Infinity,
+        bandwidthLimit: 0,
+        allowDevTools: false
     },
     computed: {
         displayStatus() {

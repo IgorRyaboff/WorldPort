@@ -10,7 +10,7 @@
     <title>WorldPort</title>
 </head>
 <body>
-    <div id="app" style="margin: 0 5px">
+    <div id="app" style="margin: 0 5px;">
         <table>
             <tr>
                 <td>Server:</td>
@@ -47,7 +47,7 @@
             <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && (isNaN(externalPort) || externalPort > 55535))"
                 @click="connect">{{ status == 0 ? 'Connect' : 'Disconnect' }}</button>
                 <button @click="showAbout">About</button>
-                <button @click="console.log('>devtools')">DevTools</button>
+                <button v-if="allowDevTools" @click="console.log('>devtools')">DevTools</button>
         </div>
         <hr/>
 
@@ -61,7 +61,7 @@
             Session ID: {{ sessionID }}
         </div>
         <div v-if="status == 3">
-            Exposing on <b style="user-select: all;">{{server}}:{{ assignedExternalPort }}</b>
+            Exposing on <b style="user-select: all;">{{server.split(':')[0]}}:{{ assignedExternalPort }}</b>
         </div>
         <div v-if="status == 3">
             {{ sockets }} sockets open
@@ -75,6 +75,9 @@
                 <span :style="{ color: sending ? 'red' : 'lightgrey' }">/\</span>
                 Sent: {{ (sent / 1024 / 1024).toFixed(1) }} MB
             </div>
+        </div>
+        <div v-if="status == 3">
+            Bandwidth limit: {{ bandwidthLimit ? bandwidthLimit + ' Mbps' : 'unlimited' }}
         </div>
         <div v-if="status == 3">
             AliveCheck interval: {{ aliveCheckInterval }} ms
