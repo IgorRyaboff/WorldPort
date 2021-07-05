@@ -1,6 +1,6 @@
 {
     "name": "worldport",
-    "version": "2021.6.17-alpha.1",
+    "version": "2021.7.5-alpha.0",
     "description": "Simple to use reverse proxy",
     "main": "main.js",
     "scripts": {
