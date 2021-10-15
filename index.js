@@ -1,6 +1,5 @@
-function setData(k, v) {
-    vueApp[k] = v;
-    console.log(`setData ${k} ${v}`);
+function setData(data) {
+    for (let i in data) Vue.set(vueApp, i, data[i]);
 }
 
 let vueApp = new Vue({
@@ -62,18 +61,11 @@ let vueApp = new Vue({
                 }
             }
         }
-    },
+    },  
     methods: {
         connect() {
             if (this.status == 0) {
-                console.log('!localIP string ' + this.localIP);
-                console.log('!localPort number ' + this.localPort);
-                console.log('!externalPort number ' + (this.externalPort || 0));
-                console.log('!force number ' + +this.force);
-                console.log('!server string ' + this.server);
-                console.log('!credsLogin string ' + (this.authMethod == 'credentials' ? this.credsLogin : 'anon'));
-                console.log('!credsPassword string ' + (this.authMethod == 'credentials' ? this.credsPassword : ''));
-                console.log('!authMethod string ' + (this.authMethod == 'anon' ? 'credentials' : this.authMethod));
+                console.log('!' + JSON.stringify(this._data));
                 console.log('>connect');
 
                 localStorage.last = JSON.stringify({

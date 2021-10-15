@@ -87,7 +87,7 @@ let data = {
 function setData(key, value) {
     data[key] = value;
     data.changed = true;
-    if (win) win.webContents.executeJavaScript(`setData('${key}', ${typeof value == 'string' ? `'${value}'` : value})`);
+    if (win) win.webContents.executeJavaScript(`setData(${JSON.stringify(data)})`);
 
     updateTray();
     trayMenuTpl[1].enabled = data.status == 3;
@@ -110,11 +110,10 @@ function createWindow() {
 
     win.webContents.on('console-message', (_, __, msg) => {
         if (msg.startsWith('!')) {
-            let key = msg.replace('!', '').split(' ')[0];
-            let type = msg.split(' ')[1];
-            let value = msg.split(' ').slice(2).join(' ');
-            data[key] = type == 'number' ? +value : value;
-            log(`setData ${key} ${type} ${value}`);
+            try {
+                data = JSON.parse(msg.slice(1));
+            }
+            catch {}
         }
 
         else if (msg.startsWith('>')) {
@@ -307,7 +306,7 @@ function wsConnect() {
             externalPort: data.externalPort || null,
             localIP: data.localIP || null,
             localPort: data.localPort || null,
-            forceExternalPort: !!data.forceExternalPort,
+            force: !!data.force,
             login: data.login || null
         };
         fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(config, null, 4));
