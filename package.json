@@ -7,7 +7,7 @@
         "test": "echo \"Error: no test specified\" && exit 1",
         "start": "electron .",
         "pack": "electron-builder --dir",
-        "dist": "electron-builder -w"
+        "dist": "electron-builder -w --ia32 --x64"
     },
     "repository": {
         "type": "git",
@@ -25,12 +25,14 @@
     },
     "devDependencies": {
         "electron": "^12.0.9",
-        "electron-builder": "^22.10.5"
+        "electron-builder": "^22.10.5",
+        "electron-packager": "^15.4.0"
     },
     "build": {
         "productName": "WorldPort",
         "artifactName": "${productName}_${version}_${os}_${arch}.${ext}",
         "win": {
+            "icon": "logo.ico",
             "target": "nsis"
         },
         "nsis": {

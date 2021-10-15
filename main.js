@@ -295,8 +295,8 @@ function wsConnect() {
     if (ws) return;
     setData('status', 1);
     let hostname = data.server.split(':')[0].toLowerCase();
-    if (config.ignoreSSL && config.ignoreSSL[hostname]) process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = 0;
-    else process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = 1;
+    if (config.ignoreSSL && config.ignoreSSL[hostname]) process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = 1;
     ws = new WebSocket.client();
     global.ws = ws;
     ws.on('connect', con => {
@@ -514,7 +514,7 @@ function wsConnect() {
     });
     ws.on('connectFailed', e => {
         ws = false;
-        console.error('WebSocket failed: ' + e + '. Retrying in 3 seconds...', data.status);
+        console.error('WebSocket failed: ' + e + '. Retrying in 3 seconds...', data.status, e);
         setData('lastError', String(e).split('\n')[0]);
         if (data.status != 0) reconTO = setTimeout(() => {
             wsConnect();
