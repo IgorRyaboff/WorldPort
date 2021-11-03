@@ -52,6 +52,7 @@ let vueApp = new Vue({
                     return 'AliveCheck timed out. Wait for reconnect...';
                 }
                 case 4009: return 'Could not obtain port in time. Wait for reconnect...';
+                case 4010: return 'Server settings changed. Wait for reconnect...';
                 case 0: return 'Not connected';
                 case 1: return 'Connecting...';
                 case 2: return 'Obtaining external port...';

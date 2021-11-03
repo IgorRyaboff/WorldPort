@@ -92,9 +92,13 @@ function setData(key, value) {
     updateTray();
     trayMenuTpl[1].enabled = data.status == 3;
     trayMenuTpl[1].label = data.status == 3 ? `Copy "${data.server.split(':')[0]}:${data.assignedExternalPort}"` : 'No external address';
+    trayMenuTpl[2].enabled = data.status != 0;
     updateTray();
 }
 
+/**
+ * @type {BrowserWindow}
+ */
 let win;
 let winShowing = true;
 function createWindow() {
@@ -113,7 +117,7 @@ function createWindow() {
             try {
                 data = JSON.parse(msg.slice(1));
             }
-            catch {}
+            catch { }
         }
 
         else if (msg.startsWith('>')) {
@@ -130,16 +134,7 @@ function createWindow() {
                     break;
                 }
                 case 'disconnect': {
-                    log('Manual disconnect');
-                    setData('status', 0);
-                    if (wsCon) {
-                        wsCon.close(1000);
-                    }
-                    if (ws) {
-                        ws.removeAllListeners();
-                        ws.abort();
-                    }
-                    clearTimeout(reconTO);
+                    disconnect();
                     break;
                 }
                 case 'init': {
@@ -157,6 +152,10 @@ function createWindow() {
                 }
                 case 'devtools': {
                     win.webContents.openDevTools();
+                    break;
+                }
+                case 'dataDir': {
+                    Electron.shell.openPath(dataDir);
                     break;
                 }
             }
@@ -194,7 +193,7 @@ function showWindow() {
         title: 'WorldPort',
         message: `RDP detected`,
         type: 'warning',
-        detail: `WorldPort detected RDP connection that go through it. Using GUI right now can cause WorldPort to hang up\nEnd the session to open window`,
+        detail: `WorldPort detected Remote Desktop Protocol connection that go through it. Using GUI right now can cause WorldPort to hang up\nEnd the session to open window`,
     });
     else win.show();
 }
@@ -218,6 +217,7 @@ let trayMenu;
 let trayMenuTpl = [
     { label: 'Open window', enabled: false, click() { showWindow() } },
     { label: 'No external address', enabled: false, click() { Electron.clipboard.writeText(`${data.server.split(':')[0]}:${data.assignedExternalPort}`, 'clipboard') } },
+    { label: 'Disconnect', enabled: false, click() { disconnect() } },
     { label: 'Quit', click() { process.exit() } }
 ];
 app.whenReady().then(() => {
@@ -253,7 +253,7 @@ function updateTray() {
         icon = 'logoErrored';
     }
     tray.setToolTip(`WorldPort v${getVersion()}\n${txt}`);
-    
+
     trayMenu = Electron.Menu.buildFromTemplate(trayMenuTpl);
     tray.setContextMenu(trayMenu);
     tray.setImage(path.join(__dirname, icon + '.ico'));
@@ -398,6 +398,13 @@ function wsConnect() {
                     log('Port obtain timed out. Trying again in 3 seconds...');
                     break;
                 }
+                case 4010: { // Server settings change
+                    reconTO = setTimeout(() => {
+                        wsConnect();
+                    }, 3000);
+                    log('Server settings changed. Trying again in 3 seconds...');
+                    break;
+                }
                 default: {
                     reconTO = setTimeout(() => {
                         wsConnect();
@@ -539,6 +546,19 @@ function wsConnect() {
         });
         log(`Creating new session for ${data.credsLogin}:${data.credsPassword.substr(0, 4)}***@${data.server}`);
     }
+}
+
+function disconnect() {
+    log('Manual disconnect');
+    setData('status', 0);
+    if (wsCon) {
+        wsCon.close(1000);
+    }
+    if (ws) {
+        ws.removeAllListeners();
+        ws.abort();
+    }
+    clearTimeout(reconTO);
 }
 
 setInterval(() => {

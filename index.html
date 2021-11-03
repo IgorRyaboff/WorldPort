@@ -27,7 +27,7 @@
             <tr>
                 <td>External port:</td>
                 <td>
-                    <input data-role="input" v-model="externalPort" :disabled="status != 0"/>
+                    <input data-role="input" v-model="externalPort" :disabled="status != 0" placeholder="&lt;random&gt;"/>
                     <label>
                         <input data-role="checkbox" type="checkbox" v-model="force" :disabled="status != 0"/>
                         Force
@@ -44,10 +44,11 @@
             </tr>
         </table>
         <div>
-            <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && (isNaN(externalPort) || externalPort > 55535))"
+            <button :disabled="!server || isNaN(localPort) || localPort < 1 || localPort > 65535 || (externalPort && externalPort.length > 0 && (isNaN(externalPort) || externalPort < 1 || externalPort > 55535))"
                 @click="connect">{{ status == 0 ? 'Connect' : 'Disconnect' }}</button>
                 <button @click="showAbout">About</button>
                 <button v-if="allowDevTools" @click="console.log('>devtools')">DevTools</button>
+                <button v-if="allowDevTools" @click="console.log('>dataDir')">Data directory</button>
         </div>
         <hr/>
 
